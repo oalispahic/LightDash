@@ -1,0 +1,25 @@
+# Optional: Cloudflare Tunnel for external access
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.cloudflared.yml up
+#
+# Prerequisites:
+# 1. Create a Cloudflare tunnel: cloudflared tunnel create <name>
+# 2. Copy credentials to: ./cloudflared/<tunnel-id>.json
+# 3. Update ./cloudflared/config.yml with your tunnel ID and hostnames
+
+version: "3.9"
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    networks:
+      - app_net
+    depends_on:
+      - nginx
+
+networks:
+  app_net:
+    external: true

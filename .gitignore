@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+package-lock.json
+yarn.lock
+
+# Environment variables (NEVER commit .env files)
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+backend/data.db
+
+# Cloudflared credentials (keep private!)
+cloudflared/*.json
+cloudflared/*.pem
+
+# Build outputs
+frontend/dist/
+backend/dist/
+build/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db

@@ -1,0 +1,14 @@
+# Cloudflare Tunnel — locally managed (credentials file, not dashboard token)
+# Fill in TUNNEL_ID after running: cloudflared tunnel create marexdev
+
+tunnel: 9baee0b6-48f1-4815-b367-d2c911f07ed9
+credentials-file: /etc/cloudflared/9baee0b6-48f1-4815-b367-d2c911f07ed9.json
+
+ingress:
+  - hostname: marexdev.com
+    service: http://nginx:80
+  - hostname: www.marexdev.com
+    service: http://nginx:80
+  - hostname: api.marexdev.com
+    service: http://nginx:80
+  - service: http_status:404
