@@ -1,0 +1,12 @@
+{
+  "name": "marex-sysd",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Privileged systems agent for MarexDev — strict whitelist of host operations behind a token-gated HTTP API.",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

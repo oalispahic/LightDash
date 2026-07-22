@@ -35,6 +35,11 @@ const config = {
 
   dockerProxyUrl: process.env.DOCKER_PROXY_URL || 'http://docker-proxy:2375',
 
+  sysd: {
+    url: process.env.SYSD_URL || 'http://marex-sysd:4000',
+    token: required('SYSD_TOKEN'),
+  },
+
   paths: {
     hwmon: '/sys/class/hwmon',
     firmwareDir: FW_DIR,

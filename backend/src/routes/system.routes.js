@@ -5,6 +5,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { asyncHandler } from '../middleware/asyncHandler.js';
 import { readSensors } from '../services/sensors.service.js';
 import { listContainers } from '../services/docker.service.js';
+import { readLogs } from '../services/system.service.js';
 
 const router = Router();
 
@@ -42,5 +43,18 @@ router.get('/info', (_req, res) => {
     node: process.version,
   });
 });
+
+// Browse: GET /logs?path=<subpath>        → JSON directory listing
+// Tail:   GET /logs?path=<file>&bytes=<n> → text/plain tail
+router.get('/logs', asyncHandler(async (req, res) => {
+  console.log(`Logs GET: path=${req.query.path || ''} bytes=${req.query.bytes || ''}`);
+  const result = await readLogs({ path: req.query.path, bytes: req.query.bytes });
+  if (result.kind === 'dir') {
+    return res.json(result.body);
+  }
+  if (result.totalSize) res.set('X-Log-Size', result.totalSize);
+  res.set('X-Log-Truncated', result.truncated ? '1' : '0');
+  res.type('text/plain').send(result.body);
+}));
 
 export default router;
