@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Box, Grid, Typography, Chip, LinearProgress, IconButton, TextField, Stack,
   Tabs, Tab, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  ToggleButtonGroup, ToggleButton,
+  ToggleButtonGroup, ToggleButton, CircularProgress, Alert,
 } from '@mui/material';
 import MemoryIcon from '@mui/icons-material/MemoryOutlined';
 import StorageIcon from '@mui/icons-material/StorageOutlined';
@@ -13,14 +13,11 @@ import CircleIcon from '@mui/icons-material/Circle';
 import PageHeader from '../components/PageHeader';
 import SectionCard from '../components/SectionCard';
 
-const MOCK_CONTAINERS = [
-  { name: 'marexdev-backend', image: 'marexdev-backend:latest', status: 'running', cpu: 3.4, mem: 124, uptime: '4d 12h' },
-  { name: 'marexdev-frontend', image: 'marexdev-frontend:latest', status: 'running', cpu: 0.8, mem: 32, uptime: '4d 12h' },
-  { name: 'nginx', image: 'nginx:alpine', status: 'running', cpu: 0.2, mem: 18, uptime: '4d 12h' },
-  { name: 'cloudflared', image: 'cloudflare/cloudflared', status: 'running', cpu: 0.5, mem: 41, uptime: '2d 03h' },
-  { name: 'redis-cache', image: 'redis:7-alpine', status: 'exited', cpu: 0, mem: 0, uptime: '–' },
-];
+const API_BASE = 'https://api.marexdev.com';
 
+// OS-level processes and resource-usage tiles are still placeholders —
+// they need a systems-agent action that isn't built yet. The Docker
+// tab, on the other hand, is now live.
 const MOCK_PROCESSES = [
   { pid: 1, user: 'root', cmd: '/sbin/init', cpu: 0.0, mem: 0.4 },
   { pid: 412, user: 'root', cmd: 'sshd', cpu: 0.0, mem: 0.2 },
@@ -41,10 +38,14 @@ const inputSx = {
   },
 };
 
-export default function Processes() {
+export default function Processes({ token }) {
   const [tab, setTab] = useState(0);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('cpu');
+
+  const [containers, setContainers] = useState([]);
+  const [containersLoading, setContainersLoading] = useState(true);
+  const [containersError, setContainersError] = useState(null);
 
   const cpuPct = 18;
   const memUsed = 4.2;
@@ -52,8 +53,38 @@ export default function Processes() {
   const diskUsed = 78;
   const memPct = (memUsed / memTotal) * 100;
 
-  const containers = MOCK_CONTAINERS.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase()) || c.image.toLowerCase().includes(search.toLowerCase())
+  const loadContainers = useCallback(async () => {
+    setContainersLoading(true);
+    setContainersError(null);
+    try {
+      const res = await fetch(`${API_BASE}/dockerps`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        let msg = body;
+        try { msg = JSON.parse(body).error || body; } catch { /* keep raw */ }
+        throw new Error(msg || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setContainers(data.containers || []);
+    } catch (e) {
+      setContainersError(e.message);
+      setContainers([]);
+    } finally {
+      setContainersLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    loadContainers();
+    const interval = setInterval(loadContainers, 30000);
+    return () => clearInterval(interval);
+  }, [loadContainers]);
+
+  const filteredContainers = containers.filter((c) =>
+    c.name.toLowerCase().includes(search.toLowerCase()) ||
+    (c.image || '').toLowerCase().includes(search.toLowerCase())
   );
   const processes = [...MOCK_PROCESSES]
     .filter((p) => p.cmd.toLowerCase().includes(search.toLowerCase()))
@@ -65,8 +96,14 @@ export default function Processes() {
         title="Processes"
         subtitle="Docker containers, OS processes, and resource usage"
         actions={
-          <IconButton sx={{ bgcolor: '#161b22', border: '1px solid #30363d', color: '#8b949e', '&:hover': { color: '#58a6ff' } }}>
-            <RefreshIcon fontSize="small" />
+          <IconButton
+            onClick={loadContainers}
+            disabled={containersLoading}
+            sx={{ bgcolor: '#161b22', border: '1px solid #30363d', color: '#8b949e', '&:hover': { color: '#58a6ff' } }}
+          >
+            {containersLoading
+              ? <CircularProgress size={16} sx={{ color: '#8b949e' }} />
+              : <RefreshIcon fontSize="small" />}
           </IconButton>
         }
       />
@@ -104,6 +141,12 @@ export default function Processes() {
         </Grid>
       </Grid>
 
+      {containersError && tab === 0 && (
+        <Alert severity="error" sx={{ mb: 2.5, bgcolor: '#3d2222', color: '#f85149', border: '1px solid #f85149' }}>
+          {containersError}
+        </Alert>
+      )}
+
       <SectionCard
         contentSx={{ p: 0, '&:last-child': { pb: 0 } }}
         sx={{ border: '1px solid #30363d' }}
@@ -119,7 +162,7 @@ export default function Processes() {
               '& .MuiTabs-indicator': { backgroundColor: '#58a6ff', height: 2 },
             }}
           >
-            <Tab label={`Docker (${MOCK_CONTAINERS.length})`} />
+            <Tab label={`Docker (${containers.length})`} />
             <Tab label={`Processes (${MOCK_PROCESSES.length})`} />
           </Tabs>
           <Stack direction="row" spacing={1} sx={{ pb: 1 }}>
@@ -158,34 +201,36 @@ export default function Processes() {
               <TableHead>
                 <TableRow>
                   <TableCell>Container</TableCell>
+                  <TableCell>State</TableCell>
                   <TableCell>Status</TableCell>
-                  <TableCell align="right">CPU</TableCell>
-                  <TableCell align="right">MEM (MB)</TableCell>
-                  <TableCell>Uptime</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {containers.map((c) => (
+                {containersLoading && containers.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={3} sx={{ textAlign: 'center', color: '#8b949e', py: 3 }}>
+                      Loading containers…
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!containersLoading && filteredContainers.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={3} sx={{ textAlign: 'center', color: '#8b949e', py: 3 }}>
+                      {search ? 'No containers match your search.' : 'No containers reported.'}
+                    </TableCell>
+                  </TableRow>
+                )}
+                {filteredContainers.map((c) => (
                   <TableRow key={c.name} hover>
                     <TableCell>
                       <Typography sx={{ color: '#fff', fontWeight: 600, fontSize: '0.85rem' }}>{c.name}</Typography>
                       <Typography sx={{ color: '#6e7681', fontSize: '0.72rem' }}>{c.image}</Typography>
                     </TableCell>
                     <TableCell>
-                      <StatusChip status={c.status} />
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography sx={{ color: '#c9d1d9', fontSize: '0.82rem', fontFamily: 'monospace' }}>
-                        {c.cpu.toFixed(1)}%
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography sx={{ color: '#c9d1d9', fontSize: '0.82rem', fontFamily: 'monospace' }}>
-                        {c.mem}
-                      </Typography>
+                      <StatusChip state={c.state} />
                     </TableCell>
                     <TableCell>
-                      <Typography sx={{ color: '#8b949e', fontSize: '0.78rem' }}>{c.uptime}</Typography>
+                      <Typography sx={{ color: '#8b949e', fontSize: '0.78rem' }}>{c.status}</Typography>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -280,13 +325,13 @@ function ResourceTile({ icon, label, primary, secondary, value, accent }) {
   );
 }
 
-function StatusChip({ status }) {
-  const running = status === 'running';
+function StatusChip({ state }) {
+  const running = state === 'running';
   return (
     <Chip
       size="small"
       icon={<CircleIcon sx={{ fontSize: '0.55rem !important' }} />}
-      label={status}
+      label={state || 'unknown'}
       sx={{
         bgcolor: running ? '#23863622' : '#3d2222',
         color: running ? '#3fb950' : '#f85149',

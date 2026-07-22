@@ -10,6 +10,8 @@ export async function listContainers() {
   const raw = await res.json();
   return raw.map((c) => ({
     name: c.Names?.[0]?.replace(/^\//, '') || c.Id.slice(0, 12),
-    status: c.Status,
+    image: c.Image,
+    state: c.State,   // "running" | "exited" | "paused" | ...
+    status: c.Status, // human-readable, e.g. "Up 4 hours"
   }));
 }
