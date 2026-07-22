@@ -22,4 +22,5 @@ services:
 
 networks:
   app_net:
+    name: marexdevserver_app_net
     external: true
