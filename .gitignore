@@ -5,7 +5,7 @@ frontend/node_modules/
 package-lock.json
 yarn.lock
 
-# Environment variables (NEVER commit .env files)
+
 .env
 .env.local
 .env.*.local
@@ -16,11 +16,9 @@ yarn.lock
 *.sqlite3
 backend/data.db
 
-# Cloudflared credentials (keep private!)
 cloudflared/*.json
 cloudflared/*.pem
 
-# Build outputs
 frontend/dist/
 backend/dist/
 build/
@@ -36,3 +34,4 @@ build/
 
 # OS
 Thumbs.db
+
