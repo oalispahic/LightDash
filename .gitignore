@@ -19,6 +19,9 @@ backend/data.db
 cloudflared/*.json
 cloudflared/*.pem
 
+# ESP32 OTA firmware artifacts — distributed out-of-band, not via git
+backend/firmware/
+
 frontend/dist/
 backend/dist/
 build/
