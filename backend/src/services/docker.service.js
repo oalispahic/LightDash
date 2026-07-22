@@ -1,15 +1,15 @@
-import { exec } from 'child_process';
+import config from '../config.js';
 
-export function listContainers() {
-  return new Promise((resolve, reject) => {
-    exec('docker ps --format "{{.Names}} {{.Status}}"', (error, stdout, stderr) => {
-      if (error) return reject(error);
-      if (stderr) return reject(new Error(stderr));
-      const containers = stdout.trim().split('\n').map(line => {
-        const [name, ...statusParts] = line.split(' ');
-        return { name, status: statusParts.join(' ') };
-      });
-      resolve(containers);
-    });
-  });
+// Talks to docker-socket-proxy which only exposes GET /containers/*.
+// Backend has no direct access to /var/run/docker.sock.
+export async function listContainers() {
+  const res = await fetch(`${config.dockerProxyUrl}/containers/json?all=1`);
+  if (!res.ok) {
+    throw new Error(`docker-proxy responded ${res.status}`);
+  }
+  const raw = await res.json();
+  return raw.map((c) => ({
+    name: c.Names?.[0]?.replace(/^\//, '') || c.Id.slice(0, 12),
+    status: c.Status,
+  }));
 }

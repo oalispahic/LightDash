@@ -37,8 +37,32 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - DOCKER_PROXY_URL=http://docker-proxy:2375
     volumes:
       - /sys/class/hwmon:/sys/class/hwmon:ro
       - ./backend/data:/app/data
+      - ./backend/firmware:/app/firmware
+    networks:
+      - app_net
+    depends_on:
+      - docker-proxy
+
+  # Docker Engine API proxy. Backend never touches /var/run/docker.sock
+  # directly — it talks HTTP to this container, which only permits the
+  # whitelisted endpoints below.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1   # GET /containers/* only
+      # All write ops (POST/DELETE), EXEC, IMAGES, VOLUMES, NETWORKS,
+      # SWARM, SYSTEM, etc. remain disabled (default 0).
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
+    tmpfs:
+      - /run
+    security_opt:
+      - no-new-privileges:true
     networks:
       - app_net

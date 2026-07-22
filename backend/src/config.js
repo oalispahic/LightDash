@@ -33,6 +33,8 @@ const config = {
     chatId: optional('TELEGRAM_CHAT_ID'),
   },
 
+  dockerProxyUrl: process.env.DOCKER_PROXY_URL || 'http://docker-proxy:2375',
+
   paths: {
     hwmon: '/sys/class/hwmon',
     firmwareDir: FW_DIR,
