@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Box, Grid, Typography, Chip, Alert, LinearProgress, CircularProgress } from '@mui/material';
+import { Box, Grid, Typography, Chip, Alert, LinearProgress, CircularProgress, IconButton } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined';
 import DnsIcon from '@mui/icons-material/DnsOutlined';
 import ThermostatIcon from '@mui/icons-material/ThermostatOutlined';
 import TimerIcon from '@mui/icons-material/TimerOutlined';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import PageHeader from '../components/PageHeader';
 import SectionCard from '../components/SectionCard';
 
@@ -29,48 +30,72 @@ export default function Dashboard({ token }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Viewport fix
   useEffect(() => {
-    const headers = { Authorization: `Bearer ${token}` };
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (meta) {
+      meta.setAttribute('content', 'width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no');
+    }
+  }, []);
 
-    const fetchData = async () => {
-      try {
-        setError(null);
-        const [statusRes, infoRes, tempRes, tempMsgRes] = await Promise.all([
-          fetch(`${API_BASE}/status`, { headers }),
-          fetch(`${API_BASE}/info`, { headers }),
-          fetch(`${API_BASE}/temperature`, { headers }),
-          fetch(`${API_BASE}/temp`, { headers }),
-        ]);
 
-        if (!statusRes.ok || !infoRes.ok || !tempRes.ok || !tempMsgRes.ok) {
-          throw new Error(
-            `API error: ${statusRes.status} ${infoRes.status} ${tempRes.status} ${tempMsgRes.status}`
-          );
-        }
-
-        const [statusData, infoData, tempData, tempMsgData] = await Promise.all([
-          statusRes.json(),
-          infoRes.json(),
-          tempRes.json(),
-          tempMsgRes.json(),
-        ]);
-
-        setStatus(statusData);
-        setInfo(infoData);
-        setTemps(tempData.sensors || []);
-        setTempMessage(tempMsgData.message);
-      } catch (err) {
-        console.error('Error fetching data:', err);
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
-  }, [token]);
+ useEffect(() => {
+   const headers = { Authorization: `Bearer ${token}` };
+   const fetchData = async () => {
+     try {
+       setError(null);
+       const [statusRes, infoRes, tempRes, tempMsgRes] = await Promise.all([
+         fetch(`${API_BASE}/status`, { headers }),
+         fetch(`${API_BASE}/info`, { headers }),
+         fetch(`${API_BASE}/temperature`, { headers }),
+         fetch(`${API_BASE}/temp`, { headers }),
+       ]);
+       if (!statusRes.ok || !infoRes.ok || !tempRes.ok || !tempMsgRes.ok) {
+         throw new Error(
+           `API error: ${statusRes.status} ${infoRes.status} ${tempRes.status} ${tempMsgRes.status}`
+         );
+       }
+       const [statusData, infoData, tempData, tempMsgData] = await Promise.all([
+         statusRes.json(),
+         infoRes.json(),
+         tempRes.json(),
+         tempMsgRes.json(),
+       ]);
+       setStatus(statusData);
+       setInfo(infoData);
+       setTemps(tempData.sensors || []);
+       setTempMessage(tempMsgData.message);
+     } catch (err) {
+       console.error('Error fetching data:', err);
+       setError(err.message);
+     } finally {
+       setLoading(false);
+     }
+   };
+ 
+   fetchData();
+   const interval = setInterval(fetchData, 30000);
+ 
+   // Touch listener for pull-to-refresh
+   let lastY = 0;
+   const handleTouchStart = (e) => {
+     lastY = e.touches[0].clientY;
+   };
+   const handleTouchEnd = (e) => {
+     if (e.changedTouches[0].clientY > lastY + 100 && window.scrollY === 0) {
+       window.location.reload();
+     }
+   };
+   window.addEventListener('touchstart', handleTouchStart);
+   window.addEventListener('touchend', handleTouchEnd);
+ 
+   // Single cleanup function for both
+   return () => {
+     clearInterval(interval);
+     window.removeEventListener('touchstart', handleTouchStart);
+     window.removeEventListener('touchend', handleTouchEnd);
+   };
+ }, [token]);
 
   const online = status?.status === 'online';
   const maxTemp = temps?.length ? Math.max(...temps.map((s) => s.celsius)) : null;
@@ -95,6 +120,14 @@ export default function Dashboard({ token }) {
           />
         }
       />
+
+      <IconButton 
+        size="small" 
+        onClick={() => window.location.reload()}
+        sx={{ color: '#58a6ff' }}
+      >
+        <RefreshIcon sx={{ fontSize: 18 }} />
+      </IconButton>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3, bgcolor: '#3d2222', color: '#f85149', border: '1px solid #f85149' }}>
