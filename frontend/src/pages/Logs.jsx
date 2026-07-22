@@ -10,6 +10,8 @@ import TerminalIcon from '@mui/icons-material/Terminal';
 import PageHeader from '../components/PageHeader';
 import SectionCard from '../components/SectionCard';
 
+const API_BASE = 'https://api.marexdev.com';
+
 const COMMON_LOGS = [
   { value: '/var/log/syslog', label: 'syslog' },
   { value: '/var/log/auth.log', label: 'auth.log' },
@@ -17,20 +19,24 @@ const COMMON_LOGS = [
   { value: '/var/log/dpkg.log', label: 'dpkg.log' },
   { value: '/var/log/nginx/access.log', label: 'nginx access' },
   { value: '/var/log/nginx/error.log', label: 'nginx error' },
-  { value: '/var/log/journal', label: 'systemd journal' },
 ];
 
 const LINE_OPTIONS = [50, 100, 200, 500, 1000];
 
-const PLACEHOLDER_OUTPUT = `# Hook this UI to GET /api/logs?path=<file>&lines=<n> on your backend.
-# The screen below will render the response body verbatim.
-#
-# Suggested backend implementation (Node):
-#   - Whitelist of allowed paths under /var/log/
-#   - Use child_process.spawn('tail', ['-n', String(lines), path])
-#   - Stream stdout back to the client (text/plain or NDJSON)
-#
-# When connected, switching the log file or hitting "Refresh" will pull fresh entries.`;
+// Rough over-fetch: assume 300 bytes per line, with a floor and ceiling
+// so short logs still fetch enough headroom and huge requests stay under
+// the agent's per-request cap (1 MB).
+const BYTES_PER_LINE = 300;
+const MIN_FETCH_BYTES = 32 * 1024;
+const MAX_FETCH_BYTES = 1024 * 1024;
+
+// UI shows absolute /var/log/... paths for familiarity, but the backend
+// expects paths relative to /var/log. Strip the prefix here.
+function toRelativePath(absPath) {
+  return absPath.replace(/^\/var\/log\/?/, '');
+}
+
+const PLACEHOLDER_OUTPUT = '# Pick a log file and hit Fetch to load the latest entries.';
 
 const inputSx = {
   '& .MuiOutlinedInput-root': {
@@ -44,7 +50,7 @@ const inputSx = {
   '& .MuiInputLabel-root': { color: '#8b949e', fontSize: '0.85rem' },
 };
 
-export default function Logs() {
+export default function Logs({ token }) {
   const [logPath, setLogPath] = useState('/var/log/syslog');
   const [customPath, setCustomPath] = useState('');
   const [lines, setLines] = useState(200);
@@ -53,29 +59,56 @@ export default function Logs() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastLoaded, setLastLoaded] = useState(null);
+  const [truncated, setTruncated] = useState(false);
 
   const effectivePath = customPath.trim() || logPath;
 
   const handleLoad = async () => {
     setLoading(true);
     setError(null);
+    setTruncated(false);
     try {
-      // TODO: replace with real endpoint once backend exposes it
-      await new Promise((r) => setTimeout(r, 350));
-      setOutput(
-        `# Mock response for ${effectivePath} (last ${lines} lines)\n` +
-          Array.from({ length: 6 })
-            .map(
-              (_, i) =>
-                `${new Date(Date.now() - i * 60000).toISOString()}  marexdev  [info]  example log line ${i + 1}`
-            )
-            .join('\n') +
-          '\n\n' +
-          PLACEHOLDER_OUTPUT
+      const relPath = toRelativePath(effectivePath);
+      const bytes = Math.min(
+        MAX_FETCH_BYTES,
+        Math.max(MIN_FETCH_BYTES, lines * BYTES_PER_LINE)
       );
+      const url = `${API_BASE}/logs?path=${encodeURIComponent(relPath)}&bytes=${bytes}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        let msg = body;
+        try { msg = JSON.parse(body).error || body; } catch { /* keep as text */ }
+        throw new Error(msg || `HTTP ${res.status}`);
+      }
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        // Path pointed at a directory rather than a file.
+        const dir = await res.json();
+        const listing = [
+          `# ${effectivePath} is a directory — pick a specific file below:`,
+          '',
+          ...(dir.dirs || []).map((d) => `[dir]  ${d}/`),
+          ...(dir.files || []).map((f) => `[file] ${f.name}  (${f.size ?? '?'} bytes)`),
+        ].join('\n');
+        setOutput(listing);
+      } else {
+        const text = await res.text();
+        // Server tails by bytes; slice the tail again by lines client-side
+        // so the "last N lines" dropdown behaves like the user expects.
+        const allLines = text.split('\n');
+        const tail = allLines.slice(-lines).join('\n');
+        setOutput(tail || '# (empty)');
+        setTruncated(res.headers.get('x-log-truncated') === '1');
+      }
       setLastLoaded(new Date());
     } catch (e) {
       setError(e.message);
+      setOutput(PLACEHOLDER_OUTPUT);
     } finally {
       setLoading(false);
     }
@@ -181,6 +214,12 @@ export default function Logs() {
       {error && (
         <Alert severity="error" sx={{ mb: 2.5, bgcolor: '#3d2222', color: '#f85149', border: '1px solid #f85149' }}>
           {error}
+        </Alert>
+      )}
+
+      {truncated && !error && (
+        <Alert severity="info" sx={{ mb: 2.5, bgcolor: '#0c2d6b', color: '#79c0ff', border: '1px solid #1f6feb' }}>
+          Only the tail of the file was fetched. Increase the line count for more history.
         </Alert>
       )}
 
