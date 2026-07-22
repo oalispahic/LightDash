@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box, Typography, MenuItem, Select, FormControl, InputLabel, Button,
   TextField, IconButton, Chip, CircularProgress, Alert, Stack,
@@ -12,16 +12,11 @@ import SectionCard from '../components/SectionCard';
 
 const API_BASE = 'https://api.marexdev.com';
 
-const COMMON_LOGS = [
-  { value: '/var/log/syslog', label: 'syslog' },
-  { value: '/var/log/auth.log', label: 'auth.log' },
-  { value: '/var/log/kern.log', label: 'kern.log' },
-  { value: '/var/log/dpkg.log', label: 'dpkg.log' },
-  { value: '/var/log/nginx/access.log', label: 'nginx access' },
-  { value: '/var/log/nginx/error.log', label: 'nginx error' },
-];
-
 const LINE_OPTIONS = [50, 100, 200, 500, 1000];
+
+// Cap the per-subdirectory listing so a chatty folder like /var/log/journal
+// doesn't blow up the dropdown with hundreds of binary rotations.
+const MAX_FILES_PER_DIR = 40;
 
 // Rough over-fetch: assume 300 bytes per line, with a floor and ceiling
 // so short logs still fetch enough headroom and huge requests stay under
@@ -51,7 +46,7 @@ const inputSx = {
 };
 
 export default function Logs({ token }) {
-  const [logPath, setLogPath] = useState('/var/log/syslog');
+  const [logPath, setLogPath] = useState('');
   const [customPath, setCustomPath] = useState('');
   const [lines, setLines] = useState(200);
   const [filter, setFilter] = useState('');
@@ -60,6 +55,75 @@ export default function Logs({ token }) {
   const [error, setError] = useState(null);
   const [lastLoaded, setLastLoaded] = useState(null);
   const [truncated, setTruncated] = useState(false);
+
+  const [sources, setSources] = useState([]);
+  const [sourcesLoading, setSourcesLoading] = useState(true);
+  const [sourcesError, setSourcesError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const headers = { Authorization: `Bearer ${token}` };
+
+    async function fetchListing(relPath) {
+      const res = await fetch(
+        `${API_BASE}/logs?path=${encodeURIComponent(relPath)}`,
+        { headers }
+      );
+      if (!res.ok) throw new Error(`Listing failed (${res.status})`);
+      return res.json();
+    }
+
+    async function loadSources() {
+      setSourcesLoading(true);
+      setSourcesError(null);
+      try {
+        const root = await fetchListing('');
+        const flat = [];
+
+        // Depth-0 files
+        for (const f of root.files || []) {
+          flat.push({ value: `/var/log/${f.name}`, rel: f.name });
+        }
+
+        // Depth-1: walk each subdirectory in parallel
+        const subListings = await Promise.all(
+          (root.dirs || []).map((dir) =>
+            fetchListing(dir).then((l) => [dir, l]).catch(() => null)
+          )
+        );
+        for (const entry of subListings) {
+          if (!entry) continue;
+          const [dir, listing] = entry;
+          const files = (listing.files || []).slice(0, MAX_FILES_PER_DIR);
+          for (const f of files) {
+            flat.push({
+              value: `/var/log/${dir}/${f.name}`,
+              rel: `${dir}/${f.name}`,
+            });
+          }
+        }
+
+        flat.sort((a, b) => a.rel.localeCompare(b.rel));
+
+        if (!cancelled) {
+          setSources(flat);
+          if (flat.length && !logPath) {
+            // Pre-select the first entry (usually syslog on Debian).
+            const preferred = flat.find((s) => s.rel === 'syslog') || flat[0];
+            setLogPath(preferred.value);
+          }
+        }
+      } catch (e) {
+        if (!cancelled) setSourcesError(e.message);
+      } finally {
+        if (!cancelled) setSourcesLoading(false);
+      }
+    }
+
+    loadSources();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const effectivePath = customPath.trim() || logPath;
 
@@ -158,17 +222,24 @@ export default function Logs({ token }) {
         sx={{ mb: 2.5 }}
       >
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 200, ...inputSx }}>
+          <FormControl size="small" sx={{ minWidth: 240, ...inputSx }}>
             <InputLabel>Log file</InputLabel>
             <Select
               label="Log file"
               value={logPath}
               onChange={(e) => { setLogPath(e.target.value); setCustomPath(''); }}
+              disabled={sourcesLoading || sources.length === 0}
               sx={{ color: '#c9d1d9', '.MuiSvgIcon-root': { color: '#8b949e' } }}
             >
-              {COMMON_LOGS.map(({ value, label }) => (
+              {sourcesLoading && (
+                <MenuItem value="" disabled>Loading /var/log…</MenuItem>
+              )}
+              {!sourcesLoading && sources.length === 0 && (
+                <MenuItem value="" disabled>No sources discovered</MenuItem>
+              )}
+              {sources.map(({ value, rel }) => (
                 <MenuItem key={value} value={value}>
-                  {label} <Typography component="span" sx={{ color: '#6e7681', ml: 1, fontSize: '0.75rem' }}>{value}</Typography>
+                  {rel}
                 </MenuItem>
               ))}
             </Select>
@@ -210,6 +281,12 @@ export default function Logs({ token }) {
           </Button>
         </Stack>
       </SectionCard>
+
+      {sourcesError && (
+        <Alert severity="warning" sx={{ mb: 2.5, bgcolor: '#3d2e0a', color: '#e3b341', border: '1px solid #9e6a03' }}>
+          Could not list /var/log ({sourcesError}). You can still type a path manually.
+        </Alert>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 2.5, bgcolor: '#3d2222', color: '#f85149', border: '1px solid #f85149' }}>
